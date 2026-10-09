@@ -4,7 +4,7 @@
 # The ./db, ./gateway and ./app folders add small, readable layers on top, built by Coolify.
 #
 #   browser -> Caddy (TLS) -> Coolify Traefik -> app:8080      (shelf domain)
-#                                            -> gateway:8000  (supabase domain: /auth/v1, /storage/v1)
+#                                            -> gateway:80    (supabase domain: /auth/v1, /storage/v1)
 #
 # Coolify placeholders (all filled in automatically):
 #   SERVICE_FQDN_APP / _GATEWAY        bare hostnames of the domains set in the UI -> public URLs
@@ -28,9 +28,9 @@ services:
       storage:
         condition: service_healthy
     environment:
-      SERVICE_FQDN_GATEWAY_8000:
+      SERVICE_FQDN_GATEWAY_80:
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8000/health"]
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1/health"]
       interval: 10s
       timeout: 5s
       retries: 10
