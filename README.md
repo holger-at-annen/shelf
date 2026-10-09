@@ -2,7 +2,7 @@
 
 ```
 browser ──https──▶ Caddy ──http──▶ Coolify Traefik ──▶ app:8080      shelf.example.com
-                                                   └──▶ gateway:8000  supabase.example.com
+                                                   └──▶ gateway:80    supabase.example.com
 gateway ──▶ auth (GoTrue) ─┐
         └─▶ storage ───────┴──▶ db (Supabase Postgres)      app ──▶ db, storage
 ```
@@ -86,10 +86,10 @@ declarations and the JWT secret must come before anything that uses them.
    ```
 3. **Coolify:** New Resource → your GitHub repo → Build Pack **Docker Compose**, Base Directory `/`,
    Docker Compose Location `/docker-compose.yml`.
-4. **Domains** (General tab, per service), **before the first deploy**. Use `http://` (Caddy does TLS) and append
-   the *container* port:
+4. **Domains** (General tab, per service), **before the first deploy**. Use `http://` (Caddy does TLS), no
+   trailing slash, and the *container* port:
    - `app` → `http://shelf.example.com:8080`
-   - `gateway` → `http://supabase.example.com:8000`
+   - `gateway` → `http://supabase.example.com` (listens on 80, so no port needed)
 5. **Variables:** fill in the required ones from the table.
 6. **Deploy.** The first boot applies ~300 migrations (a few minutes). The `app` log ends with
    `storage buckets ready` and `starting Shelf`.
@@ -121,7 +121,8 @@ State lives in three volumes: `db-data` (Postgres), `storage-data` (uploaded fil
 
 | Symptom | Cause / fix |
 |---|---|
-| 404 / "no available server" | Domain missing `:8080` / `:8000`, or the container isn't healthy yet (first boot). |
+| `404 page not found` (Traefik) | No route: domain not saved/redeployed, or wrong port. Use `http://shelf.example.com:8080`. |
+| `Bad Gateway` (Traefik) | Route exists but points to a port nothing listens on; check the port in the domain. |
 | Redirect loop / TLS error | Coolify domain set to `https://` instead of `http://`. |
 | `app` log: service key empty or rejected | Keys were minted before the JWT secret existed. Delete `SERVICE_SUPABASEANON_KEY` and `SERVICE_SUPABASESERVICE_KEY` in Coolify and redeploy. |
 | Sign-in code never arrives | SMTP settings; check the `auth` log. |
