@@ -12,4 +12,7 @@ RUN { [ -x /src/node_modules/.bin/prisma ] || npm install -g "prisma@${PRISMA_VE
 COPY ensure-buckets.mjs /opt/shelf/ensure-buckets.mjs
 COPY --chmod=0755 entrypoint.sh /usr/local/bin/shelf-entrypoint
 
+# Declared so Traefik finds the port even without one in the Coolify domain
+EXPOSE 8080
+
 ENTRYPOINT ["/usr/local/bin/shelf-entrypoint"]
