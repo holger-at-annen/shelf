@@ -25,7 +25,8 @@ shelf-coolify/                    ← repo root
 │   └── ensure-buckets.mjs        creates the 4 storage buckets
 ├── db/                           official Supabase Postgres + role passwords
 │   ├── Dockerfile
-│   └── roles.sql
+│   ├── roles.sql                 passwords for the auth and storage roles
+│   └── zz-init-complete.sh       marks first-boot init as finished (healthcheck)
 └── gateway/                      official nginx: routes /auth/v1 and /storage/v1
     ├── Dockerfile
     ├── default.conf
@@ -37,7 +38,7 @@ shelf-coolify/                    ← repo root
 
 | Service | Base image | Added by this repo |
 |---|---|---|
-| `db` | `supabase/postgres` | `roles.sql`, upstream Supabase's script that sets the service roles' passwords |
+| `db` | `supabase/postgres` | `roles.sql` (passwords for the auth and storage roles) and an init-complete marker for the healthcheck |
 | `auth` | `supabase/gotrue` | nothing |
 | `storage` | `supabase/storage-api` | nothing |
 | `gateway` | `nginx` | routing to Auth and Storage; serves the e-mail templates internally |
@@ -127,4 +128,5 @@ State lives in three volumes: `db-data` (Postgres), `storage-data` (uploaded fil
 | Photos broken / upload fails | Gateway domain not reachable over https, or the Coolify host can't reach its own public domains. |
 | URLs look like `https://http://…` | Old Coolify version; update Coolify. |
 | `gateway` log: `invalid parameter "resolve"` | nginx older than 1.27.3; keep `nginx:1.28-alpine` or newer. |
+| `db` stays unhealthy on first deploy | First-boot init failed; the reason is in the `db` log. Init only runs on an empty volume, so after fixing it delete the `db-data` and `db-config` volumes (or the whole resource) before redeploying. |
 | `db` password errors after changing `SERVICE_PASSWORD_64_POSTGRES` | Not supported after first boot; roles keep the original password. |

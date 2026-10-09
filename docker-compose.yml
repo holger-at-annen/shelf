@@ -168,10 +168,12 @@ services:
       - db-data:/var/lib/postgresql/data
       - db-config:/etc/postgresql-custom    # persists the pgsodium root key, as upstream does
     healthcheck:
-      test: ["CMD", "pg_isready", "-U", "postgres", "-h", "localhost"]
+      # Healthy only after first-boot init completed (marker from db/zz-init-complete.sh)
+      test: ["CMD-SHELL", "test -f /var/lib/postgresql/data/.init-complete && pg_isready -U postgres -h localhost"]
       interval: 5s
       timeout: 5s
       retries: 60
+      start_period: 60s
 
 volumes:
   db-data:
