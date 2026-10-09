@@ -1,0 +1,179 @@
+# Shelf.nu + minimal self-hosted Supabase (Postgres, Auth, Storage) for Coolify.
+# Build pack: Docker Compose, from this Git repo. Only official base images are used:
+#   supabase/postgres, supabase/gotrue, supabase/storage-api, nginx, ghcr.io/shelf-nu/shelf.nu
+# The ./db, ./gateway and ./app folders add small, readable layers on top, built by Coolify.
+#
+#   browser -> Caddy (TLS) -> Coolify Traefik -> app:8080      (shelf domain)
+#                                            -> gateway:8000  (supabase domain: /auth/v1, /storage/v1)
+#
+# Coolify placeholders (all filled in automatically):
+#   SERVICE_FQDN_APP / _GATEWAY        bare hostnames of the domains set in the UI -> public URLs
+#   SERVICE_PASSWORD_JWT               Supabase JWT secret (this exact name: Coolify signs the keys with it)
+#   SERVICE_SUPABASEANON_KEY /
+#   SERVICE_SUPABASESERVICE_KEY        anon / service_role JWTs, minted by Coolify from SERVICE_PASSWORD_JWT
+#   SERVICE_PASSWORD_64_*              other secrets
+# Inputs you set: ADMIN_EMAIL, SMTP_HOST, SMTP_FROM_ADDRESS (+ SMTP credentials).
+#
+# ORDER MATTERS for Coolify's parser (it reads services top to bottom):
+#   - gateway and app declare SERVICE_FQDN_*_<port> before anything references their hostnames
+#   - storage references SERVICE_PASSWORD_JWT before the keys, so they are signed with it
+
+services:
+  gateway:
+    build: ./gateway
+    restart: unless-stopped
+    depends_on:
+      auth:
+        condition: service_healthy
+      storage:
+        condition: service_healthy
+    environment:
+      SERVICE_FQDN_GATEWAY_8000:
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  storage:
+    image: supabase/storage-api:v1.74.0
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      AUTH_JWT_SECRET: ${SERVICE_PASSWORD_JWT}          # must precede the two keys
+      ANON_KEY: ${SERVICE_SUPABASEANON_KEY}
+      SERVICE_KEY: ${SERVICE_SUPABASESERVICE_KEY}
+      DATABASE_URL: postgres://supabase_storage_admin:${SERVICE_PASSWORD_64_POSTGRES}@db:5432/postgres
+      STORAGE_PUBLIC_URL: ${PUBLIC_SCHEME:-https}://${SERVICE_FQDN_GATEWAY}
+      REQUEST_ALLOW_X_FORWARDED_PATH: "true"
+      FILE_SIZE_LIMIT: ${FILE_SIZE_LIMIT:-52428800}
+      STORAGE_BACKEND: file
+      FILE_STORAGE_BACKEND_PATH: /var/lib/storage
+      GLOBAL_S3_BUCKET: shelf          # directory name under the file backend path
+      TENANT_ID: shelf
+      REGION: local
+      ENABLE_IMAGE_TRANSFORMATION: "false"
+    volumes:
+      - storage-data:/var/lib/storage
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:5000/status"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+
+  app:
+    build:
+      context: ./app
+      args:
+        SHELF_VERSION: ${SHELF_VERSION:-2.3.0}
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      auth:
+        condition: service_healthy
+      storage:
+        condition: service_healthy
+    environment:
+      SERVICE_FQDN_APP_8080:
+      PORT: "8080"
+      SERVER_URL: ${PUBLIC_SCHEME:-https}://${SERVICE_FQDN_APP}
+      SUPABASE_URL: ${PUBLIC_SCHEME:-https}://${SERVICE_FQDN_GATEWAY}
+      SUPABASE_ANON_PUBLIC: ${SERVICE_SUPABASEANON_KEY}
+      SUPABASE_SERVICE_ROLE: ${SERVICE_SUPABASESERVICE_KEY}
+      STORAGE_INTERNAL_URL: http://storage:5000      # used at start-up to create buckets
+      DATABASE_URL: postgresql://postgres:${SERVICE_PASSWORD_64_POSTGRES}@db:5432/postgres
+      DIRECT_URL: postgresql://postgres:${SERVICE_PASSWORD_64_POSTGRES}@db:5432/postgres
+      SESSION_SECRET: ${SERVICE_PASSWORD_64_SESSION}
+      INVITE_TOKEN_SECRET: ${SERVICE_PASSWORD_64_INVITE}
+      # Sign up yourself first, then set to true (see README)
+      DISABLE_SIGNUP: ${DISABLE_SIGNUP:-false}
+      ENABLE_PREMIUM_FEATURES: "false"          # self-hosted: everything unlocked, no Stripe
+      SEND_ONBOARDING_EMAIL: "false"
+      ADMIN_EMAIL: ${ADMIN_EMAIL:?}
+      SUPPORT_EMAIL: ${ADMIN_EMAIL:?}
+      SMTP_HOST: ${SMTP_HOST:?}
+      SMTP_PORT: ${SMTP_PORT:-465}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PWD: ${SMTP_PWD:-}
+      SMTP_FROM: "${APP_NAME:-Shelf} <${SMTP_FROM_ADDRESS:?}>"
+      MAPTILER_TOKEN: ${MAPTILER_TOKEN:-not-configured}   # required by Shelf; maps stay blank without a real one
+      GEOCODING_USER_AGENT: ${GEOCODING_USER_AGENT:-Shelf self-hosted}
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:8080/healthcheck').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 600s   # first boot applies ~300 migrations
+
+  auth:
+    image: supabase/gotrue:v2.196.0
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      GOTRUE_API_HOST: 0.0.0.0
+      GOTRUE_API_PORT: "9999"
+      API_EXTERNAL_URL: ${PUBLIC_SCHEME:-https}://${SERVICE_FQDN_GATEWAY}
+      GOTRUE_DB_DRIVER: postgres
+      GOTRUE_DB_DATABASE_URL: postgres://supabase_auth_admin:${SERVICE_PASSWORD_64_POSTGRES}@db:5432/postgres
+      GOTRUE_SITE_URL: ${PUBLIC_SCHEME:-https}://${SERVICE_FQDN_APP}
+      GOTRUE_URI_ALLOW_LIST: ${PUBLIC_SCHEME:-https}://${SERVICE_FQDN_APP}/**
+      GOTRUE_DISABLE_SIGNUP: ${DISABLE_SIGNUP:-false}   # invites still work (admin API)
+      GOTRUE_JWT_SECRET: ${SERVICE_PASSWORD_JWT}
+      GOTRUE_JWT_ADMIN_ROLES: service_role
+      GOTRUE_JWT_AUD: authenticated
+      GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
+      GOTRUE_JWT_EXP: "3600"
+      GOTRUE_EXTERNAL_EMAIL_ENABLED: "true"
+      GOTRUE_EXTERNAL_ANONYMOUS_USERS_ENABLED: "false"
+      GOTRUE_EXTERNAL_PHONE_ENABLED: "false"
+      GOTRUE_MAILER_AUTOCONFIRM: "false"
+      GOTRUE_MAILER_OTP_LENGTH: "6"                     # Shelf only accepts 6-digit codes
+      GOTRUE_MAILER_SUBJECTS_CONFIRMATION: Your ${APP_NAME:-Shelf} sign-up code
+      GOTRUE_MAILER_SUBJECTS_MAGIC_LINK: Your ${APP_NAME:-Shelf} sign-in code
+      GOTRUE_MAILER_SUBJECTS_RECOVERY: Reset your ${APP_NAME:-Shelf} password
+      GOTRUE_MAILER_TEMPLATES_CONFIRMATION: http://gateway:8081/email-templates/confirmation.html
+      GOTRUE_MAILER_TEMPLATES_MAGIC_LINK: http://gateway:8081/email-templates/magic_link.html
+      GOTRUE_MAILER_TEMPLATES_RECOVERY: http://gateway:8081/email-templates/recovery.html
+      GOTRUE_SMTP_HOST: ${SMTP_HOST:?}
+      GOTRUE_SMTP_PORT: ${SMTP_PORT:-465}
+      GOTRUE_SMTP_USER: ${SMTP_USER:-}
+      GOTRUE_SMTP_PASS: ${SMTP_PWD:-}
+      GOTRUE_SMTP_ADMIN_EMAIL: ${SMTP_FROM_ADDRESS:?}
+      GOTRUE_SMTP_SENDER_NAME: ${APP_NAME:-Shelf}
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:9999/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  db:
+    build: ./db
+    restart: unless-stopped
+    command: ["postgres", "-c", "config_file=/etc/postgresql/postgresql.conf", "-c", "log_min_messages=fatal"]
+    environment:
+      POSTGRES_PASSWORD: ${SERVICE_PASSWORD_64_POSTGRES}
+      POSTGRES_DB: postgres
+      JWT_EXP: "3600"
+    volumes:
+      - db-data:/var/lib/postgresql/data
+      - db-config:/etc/postgresql-custom    # persists the pgsodium root key, as upstream does
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres", "-h", "localhost"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+
+volumes:
+  db-data:
+  db-config:
+  storage-data:
