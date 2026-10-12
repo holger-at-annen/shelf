@@ -1,5 +1,5 @@
 # Official Shelf image + a start-up that does what Shelf's self-hosting docs leave to the operator:
-# Prisma migrations and the four Storage buckets. Shelf's own code is unchanged.
+# Prisma migrations, the four Storage buckets and self-hosted defaults. Shelf's own code is unchanged.
 ARG SHELF_VERSION=2.3.0
 FROM ghcr.io/shelf-nu/shelf.nu:${SHELF_VERSION}
 
@@ -9,7 +9,7 @@ RUN { [ -x /src/node_modules/.bin/prisma ] || npm install -g "prisma@${PRISMA_VE
  && test -f /src/apps/webapp/build/server/index.js \
  && ls /src/packages/database/prisma/migrations/*/migration.sql > /dev/null
 
-COPY ensure-buckets.mjs /opt/shelf/ensure-buckets.mjs
+COPY ensure-buckets.mjs self-hosted.sql /opt/shelf/
 COPY --chmod=0755 entrypoint.sh /usr/local/bin/shelf-entrypoint
 
 # Declared so Traefik finds the port even without one in the Coolify domain

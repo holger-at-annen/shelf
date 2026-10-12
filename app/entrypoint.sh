@@ -22,6 +22,21 @@ done
 
 node /opt/shelf/ensure-buckets.mjs
 
+# Self-hosted defaults: barcode + audit add-ons on (see self-hosted.sql), and ADMIN_EMAIL gets Shelf's
+# instance admin role once that account exists (i.e. from the first restart after you sign up).
+log "applying self-hosted defaults"
+admin_email=$(printf '%s' "${ADMIN_EMAIL:-}" | sed "s/'/''/g")
+if {
+  cat /opt/shelf/self-hosted.sql
+  if [ -n "$admin_email" ]; then
+    printf '\nINSERT INTO "_RoleToUser" ("A", "B")\nSELECT r.id, u.id FROM "Role" r JOIN "User" u ON lower(u.email) = lower('"'"'%s'"'"')\nWHERE r.name = '"'"'ADMIN'"'"'\nON CONFLICT DO NOTHING;\n' "$admin_email"
+  fi
+} | (cd /tmp && "$PRISMA" db execute --stdin --schema "$SCHEMA"); then
+  log "self-hosted defaults applied"
+else
+  log "WARNING: self-hosted defaults could not be applied; starting Shelf anyway"
+fi
+
 log "starting Shelf on port ${PORT:-8080}"
 cd /src/apps/webapp
 exec node ./build/server/index.js
