@@ -22,7 +22,8 @@ shelf-coolify/                    ← repo root
 ├── app/                          official Shelf image + start-up
 │   ├── Dockerfile
 │   ├── entrypoint.sh             runs migrations, then starts Shelf
-│   └── ensure-buckets.mjs        creates the 4 storage buckets
+│   ├── ensure-buckets.mjs        creates the 4 storage buckets
+│   └── self-hosted.sql           switches on the barcode and audit add-ons
 ├── db/                           official Supabase Postgres + role passwords
 │   ├── Dockerfile
 │   ├── roles.sql                 passwords for the auth and storage roles
@@ -42,7 +43,7 @@ shelf-coolify/                    ← repo root
 | `auth` | `supabase/gotrue` | nothing |
 | `storage` | `supabase/storage-api` | nothing |
 | `gateway` | `nginx` | routing to Auth and Storage; serves the e-mail templates internally |
-| `app` | `ghcr.io/shelf-nu/shelf.nu` | runs Prisma migrations and creates the buckets, then starts Shelf unchanged |
+| `app` | `ghcr.io/shelf-nu/shelf.nu` | runs Prisma migrations, creates the buckets and applies the self-hosted defaults, then starts Shelf unchanged |
 
 ## Variables
 
@@ -94,7 +95,24 @@ declarations and the JWT secret must come before anything that uses them.
 6. **Deploy.** The first boot applies ~300 migrations (a few minutes). The `app` log ends with
    `storage buckets ready` and `starting Shelf`.
 7. **Create your account:** open `https://shelf.example.com`, sign up with `ADMIN_EMAIL`, enter the e-mailed code.
-8. **Close registration:** set `DISABLE_SIGNUP=true` and redeploy.
+8. **Close registration:** set `DISABLE_SIGNUP=true` and redeploy. This restart also gives your account
+   (`ADMIN_EMAIL`) Shelf's instance admin role, with the admin dashboard at `/admin-dashboard`.
+
+## Self-hosted defaults
+
+With `ENABLE_PREMIUM_FEATURES=false`, Shelf unlocks what shelf.nu sells per plan: asset import and export,
+member import, unlimited custom fields and workspaces, bookings in every workspace, and hiding Shelf branding on
+labels. Two add-ons are the exception: **barcodes** (your own QR, Code128, Code39, DataMatrix and EAN-13
+codes) and **audits**. Shelf's permission layer reads their per-workspace flags directly, and those default to off.
+
+On every start, `app/self-hosted.sql`:
+- switches both add-ons on for all existing workspaces, **once**. If you later turn one off for a workspace in
+  the admin dashboard, a restart doesn't undo that;
+- switches them on for every new workspace as it's created (database trigger);
+- gives `ADMIN_EMAIL` the instance admin role, once that account exists. The admin dashboard can then generate
+  batches of printable Shelf QR codes and toggle add-ons per workspace.
+
+SSO stays off: it enforces SAML login, which needs SAML set up in Supabase Auth first.
 
 ### Recommended: let Traefik trust Caddy
 
